@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Configuration.Install;
 using System.Data;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -22,28 +23,112 @@ namespace WindowsFormsApp2
 
         private void button1_Click(object sender, EventArgs e)
         {
-            if (ServiceHelper.Status("test_service").ToString() == "NotExist")
+            string strDirectory = System.AppDomain.CurrentDomain.BaseDirectory;
+              Process proc = new Process();
+              proc.StartInfo.CreateNoWindow = true;
+              proc.StartInfo.FileName = "cmd.exe";
+              proc.StartInfo.UseShellExecute = false;
+              proc.StartInfo.RedirectStandardError = true;
+              proc.StartInfo.RedirectStandardInput = true;
+              proc.StartInfo.RedirectStandardOutput = true;
+              proc.Start();
+              proc.StandardInput.WriteLine("cd " + strDirectory + "baseDir\\frp");
+              proc.StandardInput.WriteLine("frp.bat ");
+              proc.StandardInput.WriteLine("exit");
+              while (!proc.StandardOutput.EndOfStream)
+              {
+                  string line = proc.StandardOutput.ReadLine();
+                  WriteLog(line,true);
+              }
+            //return true;
+
+            startFrp();
+
+        }
+        #region start frp service
+        private void startFrp(Object sender = null, EventArgs e = null)
+        {
+            Process frpProcess = null;
+            frpProcess = new Process();
+            frpProcess.StartInfo.FileName = System.AppDomain.CurrentDomain.BaseDirectory + "baseDir\\frp\\frpc.exe";
+            frpProcess.StartInfo.Arguments = " -c "+ System.AppDomain.CurrentDomain.BaseDirectory + "baseDir\\frp\\frpc.ini";
+            frpProcess.StartInfo.CreateNoWindow = true;
+            frpProcess.StartInfo.UseShellExecute = false;
+            // Guardian to restart
+            frpProcess.EnableRaisingEvents = true;
+            frpProcess.Exited += new EventHandler(startFrp);
+            // The process output
+            frpProcess.StartInfo.RedirectStandardOutput = true;
+            frpProcess.StartInfo.RedirectStandardError = true;
+            frpProcess.OutputDataReceived += new DataReceivedEventHandler(MyProcOutputHandlerData);
+            frpProcess.ErrorDataReceived += new DataReceivedEventHandler(MyProcOutputHandlerError);
+            frpProcess.Start();
+            frpProcess.BeginOutputReadLine();
+            frpProcess.BeginErrorReadLine();
+        }
+        #endregion
+
+        #region process out put
+        private void MyProcOutputHandlerData(object sendingProcess, DataReceivedEventArgs outLine)
+        {
+            if (!String.IsNullOrEmpty(outLine.Data))
             {
-                //安装
-                ServiceHelper.Install(
-                    "test_service",                                // 服务名
-                    "test_service",                             // 显示名称
-                    @"""" + Application.ExecutablePath + @""" service",      // 映像路径，可带参数，若路径有空格，需给路径（不含参数）套上双引号
-                    "Frp Windows客户端",                         // 服务描述
-                    ServiceStartType.Auto,                 // 启动类型
-                    ServiceAccount.LocalSystem,           // 运行帐户，可选，默认是LocalSystem，即至尊帐户
-                    null      // 依赖服务，要填服务名称，没有则为null或空数组，可选
-                );
-                ServiceHelper.Restart("test_service");
-                WriteToFile("已注册到系统服务，并启动（控制台无输出）..." + "\r\n");
-            }
-            else
-            {
-                //卸载
-                ServiceHelper.Uninstall("test_service");
-                WriteToFile("已删除系统服务，因系统机制，如重新注册需重启本程序（或exploere.exe）..." + "\r\n");
+                WriteLog(outLine.Data, true);
+                if (outLine.Data.ToString().Contains("start proxy success"))
+                {
+                    WriteFrpServiceStatus("[frpServiceStatus]\n\r runing=true");
+                }
+                if (outLine.Data.ToString().Contains("error: i/o deadline reached"))
+                {
+                    WriteFrpServiceStatus("[frpServiceStatus]\n\r runing=false");
+                }
             }
         }
+        private void MyProcOutputHandlerError(object sendingProcess, DataReceivedEventArgs outLine)
+        {
+            if (!String.IsNullOrEmpty(outLine.Data))
+            {
+                WriteLogError(outLine.Data, true);
+                if (outLine.Data.ToString().Contains("start proxy success"))
+                {
+                    WriteFrpServiceStatus("[frpServiceStatus]\n\r runing=true");
+                }
+                if (outLine.Data.ToString().Contains("error: i/o deadline reached"))
+                {
+                    WriteFrpServiceStatus("[frpServiceStatus]\n\r runing=false");
+                }
+            }
+        }
+        #endregion
+
+        #region write log
+        private void WriteLog(string logStr, bool wTime = true)
+        {
+            using (System.IO.StreamWriter sw = new System.IO.StreamWriter(AppDomain.CurrentDomain.BaseDirectory + "\\FrpWindowsServiceAutoService.log", true))
+            {
+                string timeStr = wTime == true ? DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss ") : "";
+                sw.WriteLine(timeStr + logStr);
+            }
+        }
+        private void WriteLogError(string logStr, bool wTime = true)
+        {
+            using (System.IO.StreamWriter sw = new System.IO.StreamWriter(AppDomain.CurrentDomain.BaseDirectory + "\\FrpWindowsServiceAutoServiceError.log", true))
+            {
+                string timeStr = wTime == true ? DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss ") : "";
+                sw.WriteLine(timeStr + logStr);
+            }
+        }
+        #endregion
+
+        #region write Frp ServiceStatus
+        private void WriteFrpServiceStatus(string statusStr)
+        {
+            using (System.IO.StreamWriter sw = new System.IO.StreamWriter(AppDomain.CurrentDomain.BaseDirectory + "\\FrpWindowsServiceStatus.ini", true))
+            {
+                sw.Write(statusStr);
+            }
+        }
+        #endregion
 
         public void WriteToFile(string Message)
         {
@@ -69,8 +154,8 @@ namespace WindowsFormsApp2
                 }
             }
         }
-        string serviceName = "ZookeeperWindowsService";
-        string serviceFilePath = AppDomain.CurrentDomain.BaseDirectory + "\\ZookeeperWindowsService.exe";
+        string serviceName = "FrpWindowsService";
+        string serviceFilePath = "G:\\work\\git\\WinformInstallService\\setup\\setup\\bin\\Debug\\baseDir\\frp" + "\\FrpWindowsService.exe";
         private void button2_Click(object sender, EventArgs e)
         {
             if (this.IsServiceExisted(serviceName))
